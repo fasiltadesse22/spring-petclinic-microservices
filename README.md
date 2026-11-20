@@ -295,3 +295,20 @@ For pull requests, editor preferences are available in the [editor config](.edit
 ## Supported by
 
 [![JetBrains logo](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSourceSupport)
+
+## DevOps Platform Engineering course-fork stabilization (November 2026)
+
+This fork retains the original Java 17 / Spring Boot 4.0.1 multi-module business system. The course-specific local supervisor deliberately differs from upstream's historical convenience scripts.
+
+- Build the exact checked-out source with `./mvnw -B package` before using the local launcher. The fork-specific Maven test workflow is recorded in [the stabilization evidence](docs/stabilization/STABILIZATION_EVIDENCE_V1.md).
+- On a Linux host with Python 3 pidfd support, run `bash scripts/run_all.sh --no-infra` for local JVM mode, or omit `--no-infra` to start only the explicitly owned support containers. External Config Server is pinned by the `PETCLINIC_CONFIG_REF` environment variable, default `323993ce2519c6d02df63e08bf4458d123d3b611`. This does not change the upstream Docker Compose runtime configuration.
+- The runner records each `-jar` child PID, `/proc` start ticks, and JAR identity in `target/local-supervisor/`. `bash scripts/stop_all.sh` sends SIGTERM, then a bounded SIGKILL only to the recorded process instance using a Linux pidfd. It does **not** use `pkill`, generic process-name matching, forceful container deletion, or unscoped Compose teardown. Stale identity records are treated as not-owned.
+- Health polling checks the actual `/actuator/health` response and exits nonzero if the process dies or readiness times out; a successful launch does not equal a healthy service. `PETCLINIC_READINESS_TIMEOUT` controls the per-service deadline. Inspect `target/local-supervisor/*.log` on failure.
+- The inherited GenAI service is **opt-in**, via `--with-genai` only. Chaos Monkey is likewise opt-in via `--chaos-monkey`. Neither is called by the baseline tests; do not configure paid API credentials merely to run the core platform.
+- `python3 scripts/test_managed_process.py` validates exact process ownership against disposable, non-Java child processes; `bash scripts/test_safe_launcher.sh` validates simulated success, timeout and early exit. Both are distinct from a running Spring application.
+- `bash scripts/smoke_config_server.sh` and `bash scripts/smoke_gateway.sh` are real-JVM smoke probes for an isolated, disposable Linux CI environment; they create loopback application processes and explicitly clean up. Gateway may initially return HTTP 503 until service registration converges. Review the evidence ledger for observed successes and failed cold-start deadlines before making deployment claims.
+- The upstream PR auto-triage workflow is guarded to act only on `spring-petclinic/spring-petclinic-microservices`, not automatically close course-fork PRs.
+
+**Scope and limitations:** The completed Maven CI and controlled real-JVM smoke do not prove Docker/Kubernetes production behavior, full request-draining semantics, PID-namespace init behavior, customer data durability, cloud readiness, or learner mastery. Docker Compose fixed `container_name` and floating upstream images remain inherited; a real Compose integration baseline is separate roadmap work. This course also maintains an **independent React academy repository**; no monorepo.
+
+**Safety note:** `run_all.sh`/`stop_all.sh` are intentionally Linux-only and fail closed when pidfd support is unavailable. They are not a macOS process supervisor. Do not use them to manage unrelated processes or a shared production host.
