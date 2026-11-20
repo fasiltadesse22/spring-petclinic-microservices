@@ -41,6 +41,12 @@ class TestOwnership(unittest.TestCase):
  def test_duplicate_ownership_refused(self):
   p=self.spawn();self.own(p)
   self.assertNotEqual(self.call("record","--file",self.record,"--jar",self.jar,"--pid",p.pid).returncode,0)
+ def test_unrecorded_abort_only_owned(self):
+  p=self.spawn();unrelated=self.spawn()
+  result=self.call("abort","--file",self.record,"--pid",p.pid,"--jar",self.jar,"--grace",0.2)
+  self.assertEqual(result.returncode,0,result.stderr)
+  p.wait(timeout=3)
+  self.assertIsNone(unrelated.poll())
  def test_host_pid1_refused(self):
   self.assertNotEqual(self.call("record","--file",self.record,"--jar",self.jar,"--pid",1).returncode,0)
 if __name__=="__main__":unittest.main(verbosity=2)

@@ -82,19 +82,46 @@ def stop(path,grace):
         print(f"Owned PID {value['pid']} exited")
     finally:os.close(fd)
 
+def abort(pid,jar,grace):
+    """Abort this launcher-owned child safely even when recording its ownership failed."""
+    value=info(pid)
+    jar=os.path.realpath(jar)
+    if not value or value[0] in ("Z","X","x") or not any(
+        value[2][i]=="-jar" and os.path.realpath(value[2][i+1])==jar for i in range(len(value[2])-1)
+    ):
+        print("Unrecorded child exited or does not match exact jar; no signal sent")
+        return
+    if not hasattr(os,"pidfd_open") or not hasattr(signal,"pidfd_send_signal"):
+        raise RuntimeError("pidfd unavailable; cannot safely abort unrecorded child")
+    fd=os.pidfd_open(pid)
+    try:
+        expected={"pid":pid,"start_ticks":value[1],"jar":jar}
+        if not matches(expected):raise RuntimeError("unrecorded PID identity changed; no signal sent")
+        try:signal.pidfd_send_signal(fd,signal.SIGTERM,None,0)
+        except ProcessLookupError:return
+        until=time.monotonic()+grace
+        while matches(expected) and time.monotonic()<until:time.sleep(.05)
+        if matches(expected):
+            try:signal.pidfd_send_signal(fd,signal.SIGKILL,None,0)
+            except ProcessLookupError:pass
+        print("Safely aborted only exact just-launched unrecorded child")
+    finally:os.close(fd)
+
 def main():
     p=argparse.ArgumentParser();sub=p.add_subparsers(dest="cmd",required=True)
     a=sub.add_parser("record");a.add_argument("--file",type=Path,required=True)
     a.add_argument("--pid",type=int,required=True);a.add_argument("--jar",type=Path,required=True)
-    for op in ("check","stop"):
+    for op in ("check","stop","abort"):
         a=sub.add_parser(op);a.add_argument("--file",type=Path,required=True)
-        if op=="stop":a.add_argument("--grace",type=float,default=8)
+        if op in ("stop","abort"):a.add_argument("--grace",type=float,default=8)
+        if op=="abort":a.add_argument("--pid",type=int,required=True);a.add_argument("--jar",type=Path,required=True)
     a=p.parse_args()
     try:
         if a.cmd=="record":record(a.file,a.pid,a.jar)
         elif a.cmd=="check":sys.exit(0 if matches(read(a.file) or {}) else 1)
         else:
             if not 0<=a.grace<=120:raise RuntimeError("grace out of range")
-            stop(a.file,a.grace)
+            if a.cmd=="abort":abort(a.pid,a.jar,a.grace)
+            else:stop(a.file,a.grace)
     except RuntimeError as exc:print(f"Ownership failure: {exc}",file=sys.stderr);sys.exit(2)
 if __name__=="__main__":main()

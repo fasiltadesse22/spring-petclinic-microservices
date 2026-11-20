@@ -71,7 +71,10 @@ start_app(){
   nohup java -jar "${JARS[$name]}" "--server.port=${PORT[$name]}" "${profile[@]}" > "$STATE/$name.log" 2>&1 &
  fi
  pid=$!
- python3 "$OWNER" record --file "$STATE/$name.json" --pid "$pid" --jar "${JARS[$name]}"
+ if ! python3 "$OWNER" record --file "$STATE/$name.json" --pid "$pid" --jar "${JARS[$name]}";then
+  python3 "$OWNER" abort --pid "$pid" --jar "${JARS[$name]}" --file "$STATE/$name.json" --grace "$GRACE" || true
+  return 1
+ fi
  LAUNCHED+=("$name")
  echo "Started $name at owned PID $pid"
 }

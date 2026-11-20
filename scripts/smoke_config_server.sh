@@ -30,7 +30,18 @@ done
 if ((ready!=1));then echo 'FAILED: JVM did not become healthy within 60s' >&2;tail -n 30 "$TMP/service.log";exit 6;fi
 echo 'VERIFIED: actual Config Server JVM and loopback actuator health'
 if curl -fsS --max-time 15 "http://127.0.0.1:$PORT/customers-service/default" > "$TMP/config.json";then
- echo 'VERIFIED: external Config Server request succeeded under selected ref (payload not exposed)'
+ python3 - "$TMP/config.json" "$REF" <<'PY'
+import json,sys
+try:
+    result=json.load(open(sys.argv[1]))
+    revision=result.get("version","")
+except (ValueError,OSError,TypeError):
+    revision=""
+if revision and revision==sys.argv[2]:
+    print("VERIFIED: fetched external Config Server environment has exact expected immutable revision")
+else:
+    print("UNVERIFIED: external Config Server returned 200, but revision does not establish exact pin; observed version="+str(revision)[:40])
+PY
 else
  echo 'UNVERIFIED: external configuration fetch; only Config Server health was established'
 fi
