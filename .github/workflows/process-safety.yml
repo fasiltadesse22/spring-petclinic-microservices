@@ -1,0 +1,22 @@
+name: Local process safety
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  process-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax and Python compile
+        run: |
+          bash -n scripts/run_all.sh scripts/stop_all.sh scripts/test_safe_launcher.sh
+          python3 -m py_compile scripts/managed_process.py scripts/test_managed_process.py
+      - name: Verify owned process instance with pidfds
+        run: python3 scripts/test_managed_process.py
+      - name: Verify fake startup success/failure and idempotent cleanup
+        run: bash scripts/test_safe_launcher.sh
+      - name: Reject legacy broad process termination
+        run: |
+          ! grep -nE 'pkill|killall|docker rm --force|docker compose down --remove-orphans' scripts/run_all.sh scripts/stop_all.sh

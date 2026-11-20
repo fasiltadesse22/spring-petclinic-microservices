@@ -17,7 +17,7 @@ jobs:
   # Running both checks in the same job ensures they are sequential and never
   # post two independent comments on the same PR.
   triage-pr:
-    if: github.event_name == 'pull_request_target'
+    if: github.repository == 'spring-petclinic/spring-petclinic-microservices' && github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - name: Ensure required labels exist
@@ -226,7 +226,7 @@ jobs:
 
   # ── 2. Daily: close PRs still labelled needs-information after 7 days ────────
   close-stale-incomplete:
-    if: github.event_name == 'schedule'
+    if: github.repository == 'spring-petclinic/spring-petclinic-microservices' && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Close PRs with incomplete template after 7 days of inactivity
