@@ -1,7 +1,6 @@
-name: Experimental real Config Server smoke
+name: Manual bounded JVM runtime smoke
 on:
-  push:
-    branches: [stabilization/safe-local-supervision-readiness]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
