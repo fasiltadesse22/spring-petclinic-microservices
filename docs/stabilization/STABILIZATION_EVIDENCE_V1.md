@@ -33,4 +33,12 @@
 
 ## Checkpoint update
 
-Final feature/merge SHAs, post-merge CI and readiness verdict are recorded after green gates and actual merges. Part 1.1.6 (systemd) remains planned.
+**Verified PetClinic merge:** [PR #1](https://github.com/fasiltadesse22/spring-petclinic-microservices/pull/1) squash-merged to main as `935dc9707d4bb131e8e06d61bc2dbc721d85e415` on November 20, 2026.
+
+**Required PR checks before merge:** [Maven run 44801760603](https://github.com/fasiltadesse22/spring-petclinic-microservices/actions/runs/44801760603) SUCCESS, [process-safety run 44801761397](https://github.com/fasiltadesse22/spring-petclinic-microservices/actions/runs/44801761397) SUCCESS (7 Python ownership tests; timeout, fake-ready, early exit, preexisting container collision and simulated Compose project-scope scenarios).
+
+**Real application execution:** [bounded JVM smoke 44800925965](https://github.com/fasiltadesse22/spring-petclinic-microservices/actions/runs/44800925965) SUCCESS: Config Server exact external version, seven actual local JVM health results, Gateway-to-Customers GET after Eureka convergence, and owned-process cleanup. [Run 44801206853](https://github.com/fasiltadesse22/spring-petclinic-microservices/actions/runs/44801206853) provided an additional bounded smoke reproduction on a documentation-augmented branch (consult the run for its exact conclusion). An earlier 35s timeout failed as recorded, not suppressed.
+
+**Runtime scope:** The actual Gateway HTTP path establishes a minimal healthy developer-mode baseline, not verified container deployment, request draining, systemd service behavior, production security, or workload performance.
+
+**Deferred:** Docker Compose real runtime integration, container image digest pinning, strict non-root runtime, GitHub branch-protection enforcement (API unavailable), Kubernetes and cloud infrastructure. Part 1.1.6 remains planned.
