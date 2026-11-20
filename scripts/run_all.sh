@@ -1,105 +1,116 @@
 #!/usr/bin/env bash
-
-set -o errexit
-set -o errtrace
-set -o nounset
-set -o pipefail
-
-usage() {
-  echo "Usage: $0 [--chaos-monkey]"
-  echo "  --chaos-monkey  Start all apps with the chaos-monkey Spring profile enabled (default: disabled)"
-}
-
-CHAOS_MONKEY="no"
-for arg in "$@"; do
-  case "${arg}" in
-    --chaos-monkey) CHAOS_MONKEY="yes" ;;
-    -h|--help) usage; exit 0 ;;
-    *)
-      echo "Unknown option: ${arg}" >&2
-      usage
-      exit 1
-      ;;
-  esac
+# Owned local launcher: no broad process matching or Docker project teardown.
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+STATE="$ROOT/target/local-supervisor"
+OWNER="$ROOT/scripts/managed_process.py"
+PROJECT="${PETCLINIC_COMPOSE_PROJECT:-petclinic-learning-$(id -u)}"
+TIMEOUT="${PETCLINIC_READINESS_TIMEOUT:-120}"
+GRACE="${PETCLINIC_STOP_GRACE:-8}"
+CONFIG_REF="${PETCLINIC_CONFIG_REF:-323993ce2519c6d02df63e08bf4458d123d3b611}"
+WITH_INFRA=1
+WITH_GENAI=0
+CHAOS=0
+INFRA=(grafana-server prometheus-server tracing-server)
+APP=(config-server discovery-server customers-service visits-service vets-service api-gateway admin-server)
+declare -A PORT=([config-server]=8888 [discovery-server]=8761 [customers-service]=8081 [visits-service]=8082 [vets-service]=8083 [genai-service]=8084 [api-gateway]=8080 [admin-server]=9090)
+declare -A JARS=()
+LAUNCHED=()
+INFRA_STARTED=0
+usage(){ echo "Usage: $0 [--no-infra] [--with-genai] [--chaos-monkey]"; }
+for arg in "$@";do
+ case "$arg" in
+  --no-infra) WITH_INFRA=0;;
+  --with-genai) WITH_GENAI=1;;
+  --chaos-monkey) CHAOS=1;;
+  --help|-h) usage;exit 0;;
+  *) echo "Unknown option $arg" >&2;exit 2;;
+ esac
 done
-
-INFRA_SERVICES=(grafana-server prometheus-server tracing-server)
-
-APP_MODULES=(config-server discovery-server customers-service visits-service vets-service genai-service api-gateway admin-server)
-
-# Resolves the executable jar of a module (ignores sources/javadoc/original jars).
-find_jar() {
-  ls "$1"/target/*.jar 2>/dev/null | grep -v -- '-sources\|-javadoc\|\.original' | head -n 1 || true
+((WITH_GENAI==0)) || APP+=(genai-service)
+[[ "$TIMEOUT" =~ ^[0-9]+$ ]] && ((TIMEOUT>=1&&TIMEOUT<=600)) || { echo "Invalid readiness timeout" >&2;exit 2; }
+[[ "$PROJECT" =~ ^[a-z][a-z0-9_-]{1,50}$ ]] || { echo "Invalid Compose project name" >&2;exit 2; }
+command -v python3 >/dev/null
+python3 -c 'import os,signal,sys;sys.exit(0 if hasattr(os,"pidfd_open") and hasattr(signal,"pidfd_send_signal") else 2)' || { echo "pidfd unavailable; refuse unsafe numeric PID fallback" >&2;exit 2; }
+mkdir -p "$STATE"
+find_jar(){
+ local name="$1" matches
+ matches="$(find "$ROOT/spring-petclinic-$name/target" -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name '*.original' -print 2>/dev/null | sort)"
+ [[ "$(printf '%s\n' "$matches" | grep -c . || true)" == 1 ]] || { echo "Expected exactly one executable JAR for $name, found: $matches" >&2;return 1; }
+ printf '%s\n' "$matches"
 }
-
-# Starts a Spring Boot jar in the background and records its PID in target/<name>.pid.
-start_app() {
-  local module="$1" port="$2" name="$3" jar
-  jar=$(find_jar "${module}")
-  nohup java -jar "${jar}" --server.port="${port}" ${PROFILE_ARG} > "target/${name}.log" 2>&1 &
-  echo $! > "target/${name}.pid"
-}
-
-# Polls a service actuator health endpoint until it answers.
-# Fails fast if the process died, and only warns after a timeout.
-wait_for_service() {
-  local name="$1" port="$2" timeout="${3:-120}" waited=0
-  echo "Waiting for ${name} on port ${port} (timeout: ${timeout}s)"
-  until curl --silent --fail --output /dev/null "http://localhost:${port}/actuator/health"; do
-    if ! kill -0 "$(cat "target/${name}.pid")" 2>/dev/null; then
-      echo "Error: ${name} exited unexpectedly, last log lines (target/${name}.log):" >&2
-      tail -n 20 "target/${name}.log" >&2
-      exit 1
-    fi
-    if (( waited >= timeout )); then
-      echo "Warning: ${name} did not become healthy within ${timeout}s (see target/${name}.log)" >&2
-      return 0
-    fi
-    sleep 2
-    waited=$((waited + 2))
-  done
-}
-
-# Fail before touching anything if the project has not been built
-for module in "${APP_MODULES[@]}"; do
-  if [[ -z "$(find_jar "spring-petclinic-${module}")" ]]; then
-    echo "Error: no jar found in spring-petclinic-${module}/target. Build the project first: ./mvnw clean install -DskipTests" >&2
-    exit 1
+for name in "${APP[@]}";do
+ JARS[$name]="$(find_jar "$name")" || { echo "Build the Maven reactor first" >&2;exit 1; }
+ [[ ! -e "$STATE/$name.json" ]] || { echo "Existing ownership marker for $name; manually inspect before retry" >&2;exit 1; }
+done
+compose(){ docker compose -p "$PROJECT" -f "$ROOT/docker-compose.yml" "$@"; }
+on_exit(){
+ local result="$1" name
+ trap - EXIT INT TERM
+ if ((result!=0));then
+  echo "Startup failed (code $result); cleaning only resources launched by this invocation" >&2
+  for name in "${LAUNCHED[@]}";do python3 "$OWNER" stop --file "$STATE/$name.json" --grace "$GRACE" || true;done
+  if ((INFRA_STARTED));then
+   compose stop "${INFRA[@]}" || true
+   compose rm -f "${INFRA[@]}" || true
+   rm -f "$STATE/infra.project"
   fi
-done
-
-pkill -9 -f spring-petclinic || echo "Failed to kill any apps"
-
-# Containers have fixed names (container_name in docker-compose.yml): remove them, including
-# stopped ones or ones created from another compose project/directory, to avoid name conflicts.
-docker compose down --remove-orphans || echo "No docker containers are running"
-docker rm --force "${INFRA_SERVICES[@]}" > /dev/null 2>&1 || true
-
-PROFILE_ARG=""
-if [[ "${CHAOS_MONKEY}" == "yes" ]]; then
-  echo "Chaos Monkey activé (profil chaos-monkey)"
-  PROFILE_ARG="--spring.profiles.active=chaos-monkey"
-else
-  echo "Chaos Monkey désactivé"
+ fi
+}
+trap 'on_exit $?' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+start_app(){
+ local name="$1" pid
+ local -a profile=()
+ ((CHAOS==0)) || profile+=(--spring.profiles.active=chaos-monkey)
+ if [[ "$name" == config-server ]];then
+  SPRING_CLOUD_CONFIG_SERVER_GIT_DEFAULT_LABEL="$CONFIG_REF" nohup java -jar "${JARS[$name]}" "--server.port=${PORT[$name]}" "${profile[@]}" > "$STATE/$name.log" 2>&1 &
+ else
+  nohup java -jar "${JARS[$name]}" "--server.port=${PORT[$name]}" "${profile[@]}" > "$STATE/$name.log" 2>&1 &
+ fi
+ pid=$!
+ python3 "$OWNER" record --file "$STATE/$name.json" --pid "$pid" --jar "${JARS[$name]}"
+ LAUNCHED+=("$name")
+ echo "Started $name at owned PID $pid"
+}
+wait_ready(){
+ local name="$1" deadline=$((SECONDS+TIMEOUT))
+ local endpoint="http://127.0.0.1:${PORT[$name]}/actuator/health"
+ while :;do
+  if curl -fsS --connect-timeout 1 --max-time 3 -o /dev/null "$endpoint";then echo "Healthy: $name";return 0;fi
+  if ! python3 "$OWNER" check --file "$STATE/$name.json";then
+   echo "FAILED: $name process exited before health ($STATE/$name.log)" >&2
+   tail -n 20 "$STATE/$name.log" >&2 || true
+   return 1
+  fi
+  if ((SECONDS>=deadline));then
+   echo "FAILED: $name not healthy within ${TIMEOUT}s" >&2
+   tail -n 20 "$STATE/$name.log" >&2 || true
+   return 1
+  fi
+  sleep 2
+ done
+}
+if ((WITH_INFRA));then
+ command -v docker >/dev/null || { echo "Docker required or select --no-infra" >&2;exit 1; }
+ for name in "${INFRA[@]}";do
+  # Inherited Compose defines fixed container_name; never replace another project.
+  if docker container inspect "$name" >/dev/null 2>&1;then echo "Refusing existing container $name" >&2;exit 1;fi
+ done
+ if [[ -e "$STATE/infra.project" ]] || [[ -n "$(compose ps -q "${INFRA[@]}")" ]];then
+  echo "Existing Compose project state; refusing takeover" >&2;exit 1
+ fi
+ printf '%s\n' "$PROJECT" > "$STATE/infra.project"
+ INFRA_STARTED=1
+ compose up -d "${INFRA[@]}"
 fi
-
-echo "Running infra"
-docker compose up -d "${INFRA_SERVICES[@]}"
-
-echo "Running apps"
-mkdir -p target
-start_app spring-petclinic-config-server 8888 config-server
-wait_for_service config-server 8888
-start_app spring-petclinic-discovery-server 8761 discovery-server
-wait_for_service discovery-server 8761
-start_app spring-petclinic-customers-service 8081 customers-service
-start_app spring-petclinic-visits-service 8082 visits-service
-start_app spring-petclinic-vets-service 8083 vets-service
-start_app spring-petclinic-genai-service 8084 genai-service
-start_app spring-petclinic-api-gateway 8080 api-gateway
-start_app spring-petclinic-admin-server 9090 admin-server
-for service in "customers-service 8081" "visits-service 8082" "vets-service 8083" "genai-service 8084" "api-gateway 8080" "admin-server 9090"; do
-  # shellcheck disable=SC2086
-  wait_for_service ${service}
+for name in "${APP[@]}";do
+ start_app "$name"
+ if [[ "$name" == config-server || "$name" == discovery-server ]];then wait_ready "$name";fi
 done
-echo "All apps started"
+for name in "${APP[@]}";do
+ if [[ "$name" != config-server && "$name" != discovery-server ]];then wait_ready "$name";fi
+done
+echo "All requested services healthy; ownership records in $STATE"
