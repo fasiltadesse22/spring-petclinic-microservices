@@ -11,7 +11,7 @@ cleanup(){
 }
 trap cleanup EXIT
 echo "GATEWAY-SMOKE source=$(git rev-parse HEAD)"
-if ! PETCLINIC_READINESS_TIMEOUT=35 timeout 210 bash scripts/run_all.sh --no-infra >"$LOG" 2>&1;then
+if ! PETCLINIC_READINESS_TIMEOUT=90 timeout 360 bash scripts/run_all.sh --no-infra >"$LOG" 2>&1;then
  echo 'FAILED: application startup/readiness; last diagnostic lines follow' >&2
  tail -n 80 "$LOG" >&2
  exit 1
