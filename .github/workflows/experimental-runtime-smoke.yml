@@ -18,3 +18,5 @@ jobs:
         run: ./mvnw -B -DskipTests package
       - name: Verify disposable Config Server process and health
         run: bash scripts/smoke_config_server.sh
+      - name: Verify bounded real Gateway to Customers HTTP path
+        run: bash scripts/smoke_gateway.sh
