@@ -13,6 +13,8 @@ jobs:
         run: |
           bash -n scripts/run_all.sh scripts/stop_all.sh scripts/test_safe_launcher.sh
           python3 -m py_compile scripts/managed_process.py scripts/test_managed_process.py
+      - name: Validate course continuity authority
+        run: python3 scripts/test_governance.py
       - name: Verify owned process instance with pidfds
         run: python3 scripts/test_managed_process.py
       - name: Verify fake startup success/failure and idempotent cleanup
