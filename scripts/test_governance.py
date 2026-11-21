@@ -14,7 +14,7 @@ class GovernanceContinuityTests(unittest.TestCase):
         self.assertTrue(EVIDENCE.is_file())
         text = STATE.read_text(encoding="utf-8")
         for token in ("Academy progress ledger", "runtime", "source-inspected", "systemd",
-                      "docs", "prerequisite", "merge", "evidence"):
+                      "docs", "scope", "merge", "evidence"):
             self.assertIn(token.lower(), text.lower())
         self.assertTrue((ROOT / "scripts/managed_process.py").is_file())
         self.assertTrue((ROOT / "scripts/test_managed_process.py").is_file())
