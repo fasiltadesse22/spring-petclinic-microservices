@@ -1,5 +1,8 @@
 # Distributed version of the Spring PetClinic Sample Application built with Spring Cloud and Spring AI
 
+> **DevOps course fork:** To resume AI-assisted engineering, use [course current state and evidence classification](docs/governance/CURRENT_STATE.md). This README largely describes upstream-inherited capabilities; do not mistake them for capabilities independently verified by this course. The 2026-11-20 [stabilization evidence](docs/stabilization/STABILIZATION_EVIDENCE_V1.md) records a bounded real-JVM smoke but not systemd, container PID1, production graceful drain or cloud deployment.
+
+
 [![Build Status](https://github.com/spring-petclinic/spring-petclinic-microservices/actions/workflows/maven-build.yml/badge.svg)](https://github.com/spring-petclinic/spring-petclinic-microservices/actions/workflows/maven-build.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
